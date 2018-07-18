@@ -23,18 +23,29 @@ _LOGGER = logging.getLogger(__name__)
 LUTRON_CONTROLLER = 'lutron_controller'
 LUTRON_DEVICES = 'lutron_devices'
 
+LUTRON_INTEGRATION_ID = 'id'
+LUTRON_DEVICE_TYPE = 'type'
+
+AREA_SCHEMA = vol.Schema({
+    cv.slug: vol.Schema({
+        vol.Required(LUTRON_INTEGRATION_ID): cv.positive_int,
+        vol.Required(LUTRON_DEVICE_TYPE): cv.string,
+    }, extra=vol.ALLOW_EXTRA)
+}, extra=vol.ALLOW_EXTRA)
+
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Required(CONF_HOST): cv.string,
         vol.Required(CONF_PASSWORD): cv.string,
         vol.Required(CONF_USERNAME): cv.string,
+        vol.Optional("areas"): AREA_SCHEMA,
     })
 }, extra=vol.ALLOW_EXTRA)
 
 
 def setup(hass, base_config):
     """Set up the Lutron component."""
-    from pylutron import Lutron
+    from pylutron import Lutron,Output
 
     hass.data[LUTRON_CONTROLLER] = None
     hass.data[LUTRON_DEVICES] = {'light': [], 'cover': []}
@@ -43,17 +54,25 @@ def setup(hass, base_config):
     hass.data[LUTRON_CONTROLLER] = Lutron(
         config[CONF_HOST], config[CONF_USERNAME], config[CONF_PASSWORD])
 
-    hass.data[LUTRON_CONTROLLER].load_xml_db()
+    if 'areas' not in config:
+        hass.data[LUTRON_CONTROLLER].load_xml_db()
     hass.data[LUTRON_CONTROLLER].connect()
     _LOGGER.info("Connected to main repeater at %s", config[CONF_HOST])
 
     # Sort our devices into types
-    for area in hass.data[LUTRON_CONTROLLER].areas:
-        for output in area.outputs:
-            if output.type == 'SYSTEM_SHADE':
-                hass.data[LUTRON_DEVICES]['cover'].append((area.name, output))
-            else:
-                hass.data[LUTRON_DEVICES]['light'].append((area.name, output))
+    if 'areas' not in config:
+        for area in hass.data[LUTRON_CONTROLLER].areas:
+            for output in area.outputs:
+                if output.type == 'SYSTEM_SHADE':
+                    hass.data[LUTRON_DEVICES]['cover'].append((area.name, output))
+                else:
+                    hass.data[LUTRON_DEVICES]['light'].append((area.name, output))
+    else:
+       l = hass.data[LUTRON_CONTROLLER]
+       for areaname,devs in config['areas'].items():
+           for devname,dev in devs.items():
+               output = Output(l, devname, 60, dev[LUTRON_DEVICE_TYPE], dev[LUTRON_INTEGRATION_ID])
+               hass.data[LUTRON_DEVICES]['light'].append(('LUTRON %s'%areaname, output))
 
     for component in ('light', 'cover'):
         discovery.load_platform(hass, component, DOMAIN, None, base_config)
